@@ -2,8 +2,8 @@ name: Cloudflare SpeedTest & Huawei DNS Sync
 
 on:
   schedule:
-    # 每 4 小时运行一次
-    - cron: '0 */4 * * *'
+    # 每 2 小时运行一次
+    - cron: '0 */2 * * *'
   workflow_dispatch: # 支持手动触发
 
 jobs:
