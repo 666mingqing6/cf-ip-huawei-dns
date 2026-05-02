@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+.env
+
+# CFST
+CloudflareST
+cfst
+cfst_linux_amd64.tar.gz
+result.csv
+ip.txt
+ipv6.txt
+
+# Project
+gitlog/
+credentials.xlsx
+~$credentials.xlsx
+
+# OS
+.DS_Store
+Thumbs.db

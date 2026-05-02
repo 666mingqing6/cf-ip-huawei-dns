@@ -1,0 +1,42 @@
+name: Cloudflare SpeedTest & Huawei DNS Sync
+
+on:
+  schedule:
+    # 每 4 小时运行一次
+    - cron: '0 */4 * * *'
+  workflow_dispatch: # 支持手动触发
+
+jobs:
+  update-dns:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Cloudflare Speed Test
+        run: bash scripts/cf_test.sh
+
+      - name: Update Huawei DNS Record
+        env:
+          HUAWEI_AK: ${{ secrets.HUAWEI_AK }}
+          HUAWEI_SK: ${{ secrets.HUAWEI_SK }}
+          HUAWEI_REGION: ${{ secrets.HUAWEI_REGION || 'cn-north-4' }}
+          PROJECT_ID: ${{ secrets.PROJECT_ID }}
+          # 单记录模式 (旧)
+          ZONE_ID: ${{ secrets.ZONE_ID }}
+          RECORD_ID: ${{ secrets.RECORD_ID }}
+          DOMAIN_NAME: ${{ secrets.DOMAIN_NAME }}
+          # 多记录模式 (新)
+          DNS_RECORDS: ${{ secrets.DNS_RECORDS }}
+          BEST_IP: ${{ env.BEST_IP }}
+        run: python scripts/update_dns.py
