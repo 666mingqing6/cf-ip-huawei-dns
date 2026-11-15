@@ -1,30 +1,161 @@
 # Cloudflare 优选 IP 自动同步至华为云解析
 
-本项目利用 GitHub Actions 定时运行 CloudflareSpeedTest，并将测速结果中最优的 IP 自动更新到华为云 DNS 解析记录中。
+利用 GitHub Actions 定时运行 [CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest)，将测速结果中最优的 Cloudflare 边缘 IP 自动写入华为云 DNS 的 A 记录，让域名始终指向当前网络环境下响应最快的 Cloudflare 节点。
 
-## 准备工作
+> 本项目同步的是 **Cloudflare 优选 IP**，不是你家宽带的动态公网 IP。如需 DDNS（公网 IP 变化后自动改解析），需把测速步骤替换为获取出口 IP 的逻辑。
 
-您需要在 GitHub 仓库的 `Settings -> Secrets and variables -> Actions` 中添加以下 Secrets：
+## 工作原理
 
-| Secret 名称 | 说明 |
+1. GitHub Actions 按 `cron` 定时触发（默认每 2 小时）
+2. `scripts/cf_test.sh` 下载并运行 CloudflareSpeedTest，产出 `result.csv`
+3. 取 CSV 首行的最优 IP，写入 `$GITHUB_ENV` 的 `BEST_IP`
+4. `scripts/update_dns.py` 调用华为云 DNS 的 `UpdateRecordSet` 接口，覆盖目标 A 记录
+
+## 快速开始
+
+### 1. 获取代码
+
+Fork 或克隆本仓库到自己的账号下。**必须使用自己的仓库**，否则无法配置自己的 Secrets。
+
+### 2. 配置 Secrets
+
+进入仓库 `Settings → Secrets and variables → Actions → New repository secret`，逐个添加：
+
+| Secret 名称 | 是否必填 | 说明 |
+| :--- | :--- | :--- |
+| `HUAWEI_AK` | 必填 | 华为云 Access Key ID |
+| `HUAWEI_SK` | 必填 | 华为云 Secret Access Key |
+| `PROJECT_ID` | 必填 | 华为云项目 ID，须与 `HUAWEI_REGION` 对应 |
+| `ZONE_ID` | 单记录模式必填 | 域名托管区域 ID |
+| `RECORD_ID` | 单记录模式必填 | 目标 A 记录的 ID |
+| `DOMAIN_NAME` | 单记录模式必填 | 完整记录名，如 `pages.example.com`（**不要带末尾的点**） |
+| `HUAWEI_REGION` | 选填 | 默认 `cn-north-4`（华北-北京四） |
+| `DNS_RECORDS` | 多记录模式必填 | JSON 数组，见「多记录模式」 |
+
+`HUAWEI_AK` / `HUAWEI_SK` 获取：华为云控制台右上角账号名 → **我的凭证** → **访问密钥** → 新增访问密钥（`credentials.csv` 仅可下载一次）。
+
+`PROJECT_ID` 获取：**我的凭证** → **API 凭证** → 项目列表 → 找到 `cn-north-4` 对应行，复制「项目 ID」。
+
+### 3. 启用并首次运行
+
+- 进入 `Actions` 标签页，若提示 workflow 被禁用，点击 **I understand my workflows, go ahead and enable them**
+- 选择 `Cloudflare SpeedTest & Huawei DNS Sync` → **Run workflow** 手动触发一次
+- 日志中应依次出现 `最优 IP: x.x.x.x` 与 `成功更新域名 ... 解析到 IP: ...`
+
+### 4. 调整执行频率
+
+修改 `.github/workflows/main.yml` 中的 `cron` 表达式（**UTC 时间**）：
+
+| 表达式 | 含义 |
 | :--- | :--- |
-| `HUAWEI_AK` | 华为云 Access Key ID |
-| `HUAWEI_SK` | 华为云 Secret Access Key |
-| `PROJECT_ID` | 华为云项目 ID (可在“我的凭证”中获取) |
-| `ZONE_ID` | 华为云解析托管区域 ID |
-| `RECORD_ID` | 具体的 A 记录 ID |
-| `DOMAIN_NAME` | 您的完整域名 (例如 `pages.example.com`) |
+| `0 */2 * * *` | 每 2 小时整点（默认） |
+| `0 * * * *` | 每小时整点 |
+| `0 */6 * * *` | 每 6 小时整点 |
 
-## 如何获取 ID？
+## 如何获取 ZONE_ID 与 RECORD_ID
 
-您可以运行 `scripts/list_dns_info.py` 来查询您的 `ZONE_ID` 和 `RECORD_ID`。
-在本地运行前，请先设置环境变量：
+### 方式一：本地脚本（推荐）
+
 ```bash
+pip install huaweicloudsdkcore huaweicloudsdkdns
+
 export HUAWEI_AK="您的AK"
 export HUAWEI_SK="您的SK"
+export PROJECT_ID="您的项目ID"   # 可留空，SDK 会自动获取
+
 python scripts/list_dns_info.py
 ```
 
-## 自动化计划
+Windows PowerShell 写法：
 
-默认配置为每 2 小时自动运行一次测速与同步。您可以修改 `.github/workflows/main.yml` 中的 `cron` 表达式来调整频率。
+```powershell
+$env:HUAWEI_AK="您的AK"; $env:HUAWEI_SK="您的SK"; $env:PROJECT_ID="您的项目ID"
+python scripts/list_dns_info.py
+```
+
+脚本会打印每个公网域名及其 `ZONE_ID`，并列出该域名下所有 A / CNAME 记录的 `RECORD_ID`。
+
+### 方式二：控制台 + 开发者工具
+
+1. 华为云控制台 → 云解析服务 DNS → 公网解析 → 点击目标域名进入记录集列表
+2. 按 `F12` 打开开发者工具 → `Network` 面板 → 刷新页面
+3. 找到 `list_record_sets_with_line` 请求，在 Response 中查看：
+   - `recordsets[].id` → `RECORD_ID`
+   - `zones[].id` → `ZONE_ID`
+
+### 方式三：API Explorer
+
+在华为云 [API Explorer](https://apiexplorer.developer.huaweicloud.com/) 在线调用 `ListPublicZones`（取 Zone ID）与 `ListRecordSetsWithLine`（取 Record ID），无需本地环境。
+
+> **注意**：华为云 API 返回的记录名带结尾的点（如 `pages.example.com.`），填入 `DOMAIN_NAME` 时请去掉。
+
+## 多记录模式
+
+需要同时更新多条 A 记录时，不必填 `ZONE_ID` / `RECORD_ID` / `DOMAIN_NAME`，改用单个 `DNS_RECORDS` secret：
+
+```json
+[
+  {"zone_id": "xxx", "record_id": "yyy", "domain_name": "a.example.com"},
+  {"zone_id": "xxx", "record_id": "zzz", "domain_name": "b.example.com"}
+]
+```
+
+同一次运行中，所有记录会被更新为**同一个** `BEST_IP`。
+
+## 常见问题
+
+### 定时任务不触发
+
+- Fork 出来的仓库，workflow 默认处于禁用状态，需在 Actions 页面手动启用
+- 仓库连续 60 天无提交，GitHub 会自动停用定时任务，需手动 Run 一次保活
+- `schedule` 本身不精确，免费 runner 常延迟 5~30 分钟，属正常现象
+
+### 报错 `chmod: cannot access 'cfst': No such file or directory`
+
+CloudflareSpeedTest 自 v2.3.5 起，发布包内部多了一层顶层目录 `cfst_linux_amd64/`，`tar -zxf` 后二进制位于 `./cfst_linux_amd64/cfst` 而非 `./cfst`，同时 `ip.txt` 也不在根目录。
+
+本项目 `scripts/cf_test.sh` 已改为动态定位二进制路径，兼容两种打包结构。若你使用的是旧版脚本，请同步更新，或至少把解压命令改为：
+
+```bash
+tar -zxf cfst_linux_amd64.tar.gz --strip-components=1
+```
+
+### 更新步骤报错
+
+| 状态码 | 原因 | 处理 |
+| :--- | :--- | :--- |
+| `401` | AK/SK 错误，或 AK 与 `HUAWEI_REGION` 不匹配 | 核对密钥与区域 |
+| `403` | 该 AK 对应的 IAM 用户缺少 DNS 权限 | 授予 `DNS FullAccess` |
+| `404` | `ZONE_ID` 与 `RECORD_ID` 不匹配，或记录已删除 | 重新获取 ID |
+
+### 记录里的多个 IP 变成了一个
+
+`update_dns.py` 使用 `body.records = [new_ip]` **整条覆盖**，原有多个值会被清空为一个，TTL 固定为 300。若目标记录原本挂有多个 IP，请改用多记录模式拆分为多条记录。
+
+### 测速结果是否适合中国大陆访问
+
+GitHub Actions 的 runner 位于海外机房，测出的「最优 IP」反映的是该机房到 Cloudflare 的延迟，对大陆访问者的参考价值有限。若主要用户在中国大陆，建议在本机或国内 VPS 上测速后自行维护 IP 列表。
+
+### 安全建议
+
+- 不要使用主账号 AK/SK。建议创建 IAM 子用户（勾选「编程访问」），仅授予 `DNS FullAccess`
+- 仓库建议设为 Private，避免 Secrets 配置与域名信息外泄
+- AK/SK 一旦在公开渠道出现过，应立即在控制台禁用并重新生成
+
+## 目录结构
+
+```
+.
+├── .github/workflows/main.yml   # 定时任务定义
+├── scripts/
+│   ├── cf_test.sh               # 下载并运行 CloudflareSpeedTest
+│   ├── list_dns_info.py         # 查询 ZONE_ID / RECORD_ID
+│   └── update_dns.py            # 调用华为云 DNS 更新记录
+├── requirements.txt
+└── README.md
+```
+
+## 更新记录
+
+- **2026-11-16**：修复 cfst 发布包目录结构变更导致的解压失败；补充 `ip.txt` 与 IP 格式校验；重写 README
+- **2026-05-02**：支持多条 DNS 记录（`DNS_RECORDS`），整理项目结构
