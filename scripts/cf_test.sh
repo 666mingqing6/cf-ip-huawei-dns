@@ -1,17 +1,20 @@
 #!/bin/bash
 # CloudflareSpeedTest 执行脚本
 #
-# 注意：CloudflareSpeedTest 自 v2.3.5 起，发布包内部多了一层顶层目录
-# cfst_linux_amd64/，直接 tar -zxf 后二进制并不在根目录。因此这里改为
-# 动态定位二进制路径，同时兼容「扁平」与「带顶层目录」两种打包结构。
+# 说明：
+#   1. CloudflareSpeedTest 自 v2.3.5 起，发布包内部多了一层顶层目录
+#      cfst_linux_amd64/，因此这里动态定位二进制路径，兼容两种打包结构。
+#   2. 测速网段由仓库根目录的 ip_104.txt 指定，当前仅覆盖 Cloudflare 的 104.x 段。
+#   3. 下载测速地址默认用 cfst 官方地址，可通过仓库变量 CFST_DL_URL 覆盖。
 set -euo pipefail
 
-CFST_URL="https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/cfst_linux_amd64.tar.gz"
+CFST_PKG_URL="https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/cfst_linux_amd64.tar.gz"
 PKG="cfst_linux_amd64.tar.gz"
+IP_LIST="ip_104.txt"
 
 # 下载 CloudflareSpeedTest
 echo "==> 下载 CloudflareSpeedTest"
-wget -q -O "$PKG" "$CFST_URL"
+wget -q -O "$PKG" "$CFST_PKG_URL"
 
 # 解压
 echo "==> 解压"
@@ -31,26 +34,33 @@ CFST_DIR="$(dirname "$CFST_BIN")"
 cp -f "$CFST_DIR"/* . 2>/dev/null || true
 chmod +x ./cfst
 
-# cfst 依赖同目录下的 ip.txt 作为测速地址池
-if [ ! -f ip.txt ]; then
-  echo "缺少 ip.txt（cfst 必需），当前目录文件："
+# 校验网段文件
+if [ ! -f "$IP_LIST" ]; then
+  echo "缺少网段文件 $IP_LIST，当前目录文件："
   ls -la
   exit 1
 fi
 
-# 运行测速
-#   -n 200   延迟测速次数
-#   -t 4     延迟测速线程数
-#   -dn 5    对延迟最优的前 5 个 IP 做下载测速
-#   -dt 10   每个 IP 的下载测速时长（秒）
-#
-# 注意：不要加 -dd，该参数含义是「禁用下载测速」，会让下载速度一列恒为 0.00，
-#       排序随之退化为纯延迟排序，选出的 IP 只代表延迟最低而非带宽最优。
-#       启用下载测速后，result.csv 按下载速度降序排列，第 1 行表头、第 2 行即最优。
-echo "==> 开始测速"
-./cfst -n 200 -t 4 -dn 5 -dt 10 -o result.csv
+# 下载测速地址：默认 cfst 官方地址，可用仓库变量 CFST_DL_URL 覆盖（建议自建大文件地址）
+DL_URL="${CFST_DL_URL:-https://cf.xiu2.xyz/url}"
 
-# 提取最优 IP
+# 运行测速
+#   -f       指定网段文件（默认 ip.txt，本项目改为 ip_104.txt，只测 104.x）
+#   -n 200   延迟测速线程数（默认 200，最大 1000；注意是线程数，不是次数）
+#   -t 4     单个 IP 的延迟测速次数（默认 4）
+#   -dn 5    按延迟排序后，对前 5 个 IP 做下载测速
+#   -dt 10   单个 IP 的下载测速最长时长（秒）
+#   -url     下载测速地址
+#   -debug   下载测速失败时输出具体原因（403 / 超时 / 地址不可用等）
+#   -o       结果文件
+#
+# 不要加 -dd：它表示「禁用下载测速」，会让下载速度恒为 0.00，排序退化为纯延迟排序。
+echo "==> 开始测速"
+echo "    网段文件：$IP_LIST"
+echo "    下载地址：$DL_URL"
+./cfst -f "$IP_LIST" -n 200 -t 4 -dn 5 -dt 10 -url "$DL_URL" -debug -o result.csv
+
+# 输出结果预览
 echo "==> 测速结果 Top 3（按下载速度降序）"
 head -n 4 result.csv 2>/dev/null || true
 

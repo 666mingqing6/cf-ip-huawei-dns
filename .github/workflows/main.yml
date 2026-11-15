@@ -24,6 +24,10 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Cloudflare Speed Test
+        env:
+          # 可选：在仓库 Settings -> Secrets and variables -> Actions -> Variables
+          # 中设置 CFST_DL_URL 可覆盖默认下载测速地址（建议自建 Cloudflare 大文件地址）
+          CFST_DL_URL: ${{ vars.CFST_DL_URL }}
         run: bash scripts/cf_test.sh
 
       - name: Update Huawei DNS Record
