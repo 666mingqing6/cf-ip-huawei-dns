@@ -32,11 +32,11 @@ jobs:
           HUAWEI_SK: ${{ secrets.HUAWEI_SK }}
           HUAWEI_REGION: ${{ secrets.HUAWEI_REGION || 'cn-north-4' }}
           PROJECT_ID: ${{ secrets.PROJECT_ID }}
-          # 单记录模式 (旧)
+          # 单记录模式：同时配置 ZONE_ID / RECORD_ID / DOMAIN_NAME 即可
           ZONE_ID: ${{ secrets.ZONE_ID }}
           RECORD_ID: ${{ secrets.RECORD_ID }}
           DOMAIN_NAME: ${{ secrets.DOMAIN_NAME }}
-          # 多记录模式 (新)
+          # 多记录模式：JSON 数组。一旦此 secret 非空，上面的单记录配置会被完全忽略
           DNS_RECORDS: ${{ secrets.DNS_RECORDS }}
           BEST_IP: ${{ env.BEST_IP }}
         run: python scripts/update_dns.py

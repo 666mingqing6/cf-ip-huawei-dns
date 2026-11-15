@@ -39,11 +39,21 @@ if [ ! -f ip.txt ]; then
 fi
 
 # 运行测速
-# -dd 禁用下载测速，仅按延迟排序，取延迟最低的 Top 1
+#   -n 200   延迟测速次数
+#   -t 4     延迟测速线程数
+#   -dn 5    对延迟最优的前 5 个 IP 做下载测速
+#   -dt 10   每个 IP 的下载测速时长（秒）
+#
+# 注意：不要加 -dd，该参数含义是「禁用下载测速」，会让下载速度一列恒为 0.00，
+#       排序随之退化为纯延迟排序，选出的 IP 只代表延迟最低而非带宽最优。
+#       启用下载测速后，result.csv 按下载速度降序排列，第 1 行表头、第 2 行即最优。
 echo "==> 开始测速"
-./cfst -n 200 -t 4 -dn 1 -dd -o result.csv
+./cfst -n 200 -t 4 -dn 5 -dt 10 -o result.csv
 
 # 提取最优 IP
+echo "==> 测速结果 Top 3（按下载速度降序）"
+head -n 4 result.csv 2>/dev/null || true
+
 echo "==> 提取最优 IP"
 BEST_IP="$(sed -n '2p' result.csv | cut -d',' -f1 | tr -d '\r\n ' || true)"
 
